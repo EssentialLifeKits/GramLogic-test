@@ -1,0 +1,856 @@
+/* ============================================================
+   GramLogic — Application Logic (Upgraded)
+   ============================================================ */
+
+(function () {
+  'use strict';
+
+  // ========== LOCAL STORAGE HELPERS ==========
+  function loadJSON(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch { return fallback; }
+  }
+  function saveJSON(key, value) {
+    localStorage.setItem(key, JSON.stringify(value));
+  }
+
+  // ========== POST TYPE CONFIG ==========
+  const POST_TYPES = {
+    post: { label: 'Post', color: '#FEDA75', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>' },
+    story: { label: 'Story', color: '#34D399', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>' },
+    reel: { label: 'Reel', color: '#F87171', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>' },
+    carousel: { label: 'Carousel', color: '#60A5FA', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="15" height="18" rx="2"/><path d="M20 7v14a2 2 0 01-2 2H7"/></svg>' },
+    live: { label: 'Live', color: '#FB923C', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>' },
+  };
+
+  // ========== STATE ==========
+  const now = new Date();
+  const state = {
+    currentPage: 'calendar',
+    currentView: 'month',
+    currentDate: new Date(now.getFullYear(), now.getMonth(), 1),
+    today: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+    selectedDate: null,
+    posts: loadJSON('gramlogic_posts', []),
+    nextId: loadJSON('gramlogic_nextId', 1),
+    analytics: loadJSON('gramlogic_analytics', {
+      reach: 0,
+      reachChange: '0%',
+      engagement: 0,
+      engagementChange: '0%',
+      followers: 0,
+      followersChange: '0',
+      postsCount: 0,
+      postsCountChange: '0',
+    }),
+  };
+
+  function savePosts() {
+    saveJSON('gramlogic_posts', state.posts);
+    saveJSON('gramlogic_nextId', state.nextId);
+  }
+  function saveAnalytics() {
+    saveJSON('gramlogic_analytics', state.analytics);
+  }
+
+  // ========== BEST TIMES DATA ==========
+  const BEST_TIMES = [
+    { time: '9:00 AM', day: 'Weekdays', engagement: '+34%', desc: 'Morning commute peak' },
+    { time: '12:30 PM', day: 'Tue & Thu', engagement: '+28%', desc: 'Lunch break activity' },
+    { time: '7:00 PM', day: 'Mon–Fri', engagement: '+22%', desc: 'Evening browsing window' },
+  ];
+
+  // ========== DOM ELEMENTS ==========
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => document.querySelectorAll(sel);
+
+  const els = {
+    sidebar: $('#sidebar'),
+    sidebarOverlay: $('#sidebarOverlay'),
+    hamburgerBtn: $('#hamburgerBtn'),
+    navItems: $$('.nav-item'),
+    pages: $$('.page'),
+    calendarGrid: $('#calendarGrid'),
+    calendarHeader: $('#calendarHeader'),
+    calendarSubtitle: $('#calendarSubtitle'),
+    prevMonthBtn: $('#prevMonthBtn'),
+    nextMonthBtn: $('#nextMonthBtn'),
+    viewMonthBtn: $('#viewMonthBtn'),
+    viewWeekBtn: $('#viewWeekBtn'),
+    newPostBtn: $('#newPostBtn'),
+    mobileTodayBtn: $('#mobileTodayBtn'),
+    bestTimesList: $('#bestTimesList'),
+    upcomingList: $('#upcomingList'),
+    modalOverlay: $('#modalOverlay'),
+    modalClose: $('#modalClose'),
+    modalTitle: $('#modalTitle'),
+    uploadZone: $('#uploadZone'),
+    fileInput: $('#fileInput'),
+    uploadPreview: $('#uploadPreview'),
+    uploadPlaceholder: $('#uploadPlaceholder'),
+    captionInput: $('#captionInput'),
+    captionCount: $('#captionCount'),
+    dateInput: $('#dateInput'),
+    timeInput: $('#timeInput'),
+    hashtagInput: $('#hashtagInput'),
+    typeButtons: null, // set after DOM ready
+    schedulePostBtn: $('#schedulePostBtn'),
+    saveDraftBtn: $('#saveDraftBtn'),
+    modalTimesList: $('#modalTimesList'),
+    toast: $('#toast'),
+    toastMessage: $('#toastMessage'),
+    engagementCanvas: $('#engagementCanvas'),
+    topPostsList: $('#topPostsList'),
+    // analytics stat cards
+    statReach: $('#statReach'),
+    statEngagement: $('#statEngagement'),
+    statFollowers: $('#statFollowers'),
+    statPosts: $('#statPosts'),
+    // copy buttons
+    copyCaptionBtn: $('#copyCaptionBtn'),
+    copyHashtagBtn: $('#copyHashtagBtn'),
+  };
+
+  // ========== NAVIGATION ==========
+  function navigateTo(page) {
+    state.currentPage = page;
+    els.navItems.forEach(item => item.classList.toggle('active', item.dataset.page === page));
+    els.pages.forEach(p => {
+      const isTarget = p.id === 'page' + capitalize(page);
+      p.classList.toggle('active', isTarget);
+    });
+    closeSidebar();
+    if (page === 'analytics') {
+      renderAnalyticsCards();
+      drawChart();
+    }
+  }
+
+  els.navItems.forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      navigateTo(item.dataset.page);
+    });
+  });
+
+  // ========== SIDEBAR MOBILE ==========
+  function openSidebar() {
+    els.sidebar.classList.add('open');
+    els.sidebarOverlay.classList.add('active');
+    els.hamburgerBtn.classList.add('active');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeSidebar() {
+    els.sidebar.classList.remove('open');
+    els.sidebarOverlay.classList.remove('active');
+    els.hamburgerBtn.classList.remove('active');
+    document.body.style.overflow = '';
+  }
+
+  els.hamburgerBtn.addEventListener('click', () => {
+    els.sidebar.classList.contains('open') ? closeSidebar() : openSidebar();
+  });
+  els.sidebarOverlay.addEventListener('click', closeSidebar);
+
+  // ========== CALENDAR ==========
+  const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
+  const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  function renderCalendarHeader() {
+    els.calendarHeader.innerHTML = DAY_NAMES.map(d =>
+      `<div class="cal-day-name">${d}</div>`
+    ).join('');
+  }
+
+  function renderCalendar() {
+    const year = state.currentDate.getFullYear();
+    const month = state.currentDate.getMonth();
+    els.calendarSubtitle.textContent = `${MONTH_NAMES[month]} ${year}`;
+
+    if (state.currentView === 'month') {
+      renderMonthView(year, month);
+    } else {
+      renderWeekView();
+    }
+  }
+
+  function renderMonthView(year, month) {
+    els.calendarGrid.classList.remove('week-view');
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const daysInPrev = new Date(year, month, 0).getDate();
+
+    let cells = [];
+    for (let i = firstDay - 1; i >= 0; i--) {
+      const day = daysInPrev - i;
+      const dateStr = formatDate(year, month - 1, day);
+      cells.push(createDayCell(day, dateStr, true));
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = formatDate(year, month, d);
+      const isToday = dateStr === formatDate(state.today.getFullYear(), state.today.getMonth(), state.today.getDate());
+      cells.push(createDayCell(d, dateStr, false, isToday));
+    }
+    const remaining = 42 - cells.length;
+    for (let d = 1; d <= remaining; d++) {
+      const dateStr = formatDate(year, month + 1, d);
+      cells.push(createDayCell(d, dateStr, true));
+    }
+
+    els.calendarGrid.innerHTML = cells.join('');
+    attachCalendarHandlers();
+  }
+
+  function renderWeekView() {
+    els.calendarGrid.classList.add('week-view');
+    const today = state.today;
+    const dayOfWeek = today.getDay();
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - dayOfWeek);
+
+    let cells = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(weekStart);
+      d.setDate(weekStart.getDate() + i);
+      const dateStr = formatDate(d.getFullYear(), d.getMonth(), d.getDate());
+      const isToday = dateStr === formatDate(today.getFullYear(), today.getMonth(), today.getDate());
+      cells.push(createDayCell(d.getDate(), dateStr, false, isToday));
+    }
+
+    els.calendarGrid.innerHTML = cells.join('');
+    attachCalendarHandlers();
+  }
+
+  function createDayCell(day, dateStr, isOtherMonth, isToday = false) {
+    const posts = getPostsByDate(dateStr);
+    const maxVisible = 2;
+
+    // Color-coded horizontal bars (side-by-side)
+    let barsHtml = '';
+    if (posts.length > 0) {
+      const visiblePosts = posts.slice(0, maxVisible);
+      const barItems = visiblePosts.map(p => {
+        const typeConf = POST_TYPES[p.type] || POST_TYPES.post;
+        return `<div class="cal-bar cal-bar-${p.type}" style="background:${typeConf.color};" title="${escapeHtml(p.caption)} (${typeConf.label})"></div>`;
+      }).join('');
+      barsHtml = `<div class="cal-post-bars">${barItems}</div>`;
+    }
+
+    // Post entries (max 2 visible with +X more)
+    const visibleEntries = posts.slice(0, maxVisible);
+    let entriesHtml = visibleEntries.map(p => {
+      const typeConf = POST_TYPES[p.type] || POST_TYPES.post;
+      return `<div class="cal-post cal-post-type-${p.type}" title="${escapeHtml(p.caption)}">${formatTime12(p.time)} ${typeConf.label}</div>`;
+    }).join('');
+
+    if (posts.length > maxVisible) {
+      const extra = posts.length - maxVisible;
+      entriesHtml += `<div class="cal-post cal-post-more" data-date="${dateStr}">+${extra} more</div>`;
+    }
+
+    return `<div class="cal-day${isOtherMonth ? ' other-month' : ''}${isToday ? ' today' : ''}" data-date="${dateStr}">
+      <div class="cal-date">${isToday ? `<span>${day}</span>` : day}</div>
+      ${barsHtml}
+      <div class="cal-posts">${entriesHtml}</div>
+    </div>`;
+  }
+
+  function attachCalendarHandlers() {
+    els.calendarGrid.querySelectorAll('.cal-day').forEach(cell => {
+      cell.addEventListener('click', (e) => {
+        // Don't open scheduler if clicking the "+X more" toggle
+        if (e.target.classList.contains('cal-post-more')) {
+          e.stopPropagation();
+          expandMorePosts(e.target, cell.dataset.date);
+          return;
+        }
+        openScheduler(cell.dataset.date);
+      });
+    });
+  }
+
+  function expandMorePosts(el, dateStr) {
+    const posts = getPostsByDate(dateStr);
+    const cell = el.closest('.cal-day');
+    const postsContainer = cell.querySelector('.cal-posts');
+    // Replace entries with all posts
+    postsContainer.innerHTML = posts.map(p => {
+      const typeConf = POST_TYPES[p.type] || POST_TYPES.post;
+      return `<div class="cal-post cal-post-type-${p.type}" title="${escapeHtml(p.caption)}">${formatTime12(p.time)} ${typeConf.label}</div>`;
+    }).join('');
+  }
+
+  // View toggle
+  function setView(view) {
+    state.currentView = view;
+    els.viewMonthBtn.classList.toggle('active', view === 'month');
+    els.viewWeekBtn.classList.toggle('active', view === 'week');
+    renderCalendar();
+  }
+
+  els.viewMonthBtn.addEventListener('click', () => setView('month'));
+  els.viewWeekBtn.addEventListener('click', () => setView('week'));
+
+  // Month navigation
+  els.prevMonthBtn.addEventListener('click', () => {
+    state.currentDate.setMonth(state.currentDate.getMonth() - 1);
+    renderCalendar();
+  });
+  els.nextMonthBtn.addEventListener('click', () => {
+    state.currentDate.setMonth(state.currentDate.getMonth() + 1);
+    renderCalendar();
+  });
+  els.mobileTodayBtn.addEventListener('click', () => {
+    state.currentDate = new Date(state.today.getFullYear(), state.today.getMonth(), 1);
+    setView('month');
+    renderCalendar();
+  });
+
+  // ========== BEST TIMES WIDGET ==========
+  function renderBestTimes() {
+    els.bestTimesList.innerHTML = BEST_TIMES.map((bt, i) => `
+      <div class="best-time-item" data-time="${bt.time}">
+        <div class="best-time-rank rank-${i + 1}">#${i + 1}</div>
+        <div class="best-time-info">
+          <div class="best-time-label">${bt.time} · ${bt.day}</div>
+          <div class="best-time-desc">${bt.desc}</div>
+        </div>
+        <div class="best-time-engagement">${bt.engagement}</div>
+      </div>
+    `).join('');
+
+    els.bestTimesList.querySelectorAll('.best-time-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const todayStr = formatDate(state.today.getFullYear(), state.today.getMonth(), state.today.getDate());
+        openScheduler(todayStr, item.dataset.time);
+      });
+    });
+  }
+
+  function renderModalBestTimes() {
+    els.modalTimesList.innerHTML = BEST_TIMES.map(bt =>
+      `<button class="modal-time-chip" data-time="${bt.time}" type="button">${bt.time} · ${bt.engagement}</button>`
+    ).join('');
+
+    els.modalTimesList.querySelectorAll('.modal-time-chip').forEach(chip => {
+      chip.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const time24 = convertTo24(chip.dataset.time);
+        els.timeInput.value = time24;
+        validateForm();
+      });
+    });
+  }
+
+  // ========== UPCOMING POSTS WIDGET ==========
+  function renderUpcoming() {
+    const todayStr = formatDate(state.today.getFullYear(), state.today.getMonth(), state.today.getDate());
+    const upcoming = state.posts
+      .filter(p => p.date >= todayStr)
+      .sort((a, b) => new Date(a.date + 'T' + a.time) - new Date(b.date + 'T' + b.time));
+
+    els.upcomingList.innerHTML = upcoming.length === 0
+      ? `<p style="text-align:center;color:var(--text-tertiary);font-size:0.82rem;padding:20px;">No upcoming posts. Click a date to schedule!</p>`
+      : upcoming.map(p => {
+        const typeConf = POST_TYPES[p.type] || POST_TYPES.post;
+        return `
+        <div class="upcoming-item">
+          <div class="upcoming-thumb" style="border-left: 3px solid ${typeConf.color};">
+            ${typeConf.icon}
+          </div>
+          <div class="upcoming-info">
+            <div class="upcoming-caption">${escapeHtml(p.caption)}</div>
+            <div class="upcoming-meta">
+              <span>${formatDisplayDate(p.date)}</span>
+              <span>·</span>
+              <span>${formatTime12(p.time)}</span>
+              <span class="upcoming-type-badge" style="background:${typeConf.color}22;color:${typeConf.color};">${typeConf.label}</span>
+            </div>
+          </div>
+          <span class="upcoming-status status-${p.status}">${capitalize(p.status)}</span>
+        </div>`;
+      }).join('');
+  }
+
+  // ========== SCHEDULER MODAL ==========
+  let selectedType = 'post';
+  let uploadedFile = null;
+
+  function openScheduler(date, suggestedTime) {
+    state.selectedDate = date;
+    els.dateInput.value = date;
+    if (suggestedTime) {
+      els.timeInput.value = convertTo24(suggestedTime);
+    } else {
+      els.timeInput.value = '09:00';
+    }
+    els.captionInput.value = '';
+    els.hashtagInput.value = '';
+    els.captionCount.textContent = '0';
+    els.uploadPreview.classList.remove('visible');
+    els.uploadPlaceholder.style.display = '';
+    uploadedFile = null;
+    selectedType = 'post';
+    // Reset type buttons
+    els.typeButtons = $$('.type-btn');
+    els.typeButtons.forEach(b => b.classList.toggle('active', b.dataset.type === 'post'));
+    els.modalTitle.textContent = 'Schedule New Post';
+    renderModalBestTimes();
+    validateForm();
+    els.modalOverlay.classList.add('active');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function resetModalForBackToBack() {
+    els.captionInput.value = '';
+    els.hashtagInput.value = '';
+    els.captionCount.textContent = '0';
+    els.uploadPreview.classList.remove('visible');
+    els.uploadPlaceholder.style.display = '';
+    uploadedFile = null;
+    selectedType = 'post';
+    els.typeButtons = $$('.type-btn');
+    els.typeButtons.forEach(b => b.classList.toggle('active', b.dataset.type === 'post'));
+    els.timeInput.value = '09:00';
+    // Keep date the same for convenience
+    validateForm();
+  }
+
+  function closeModal() {
+    els.modalOverlay.classList.remove('active');
+    document.body.style.overflow = '';
+  }
+
+  els.modalClose.addEventListener('click', closeModal);
+  els.modalOverlay.addEventListener('click', (e) => {
+    if (e.target === els.modalOverlay) closeModal();
+  });
+  els.newPostBtn.addEventListener('click', () => {
+    const todayStr = formatDate(state.today.getFullYear(), state.today.getMonth(), state.today.getDate());
+    openScheduler(todayStr);
+  });
+
+  // ========== FORM VALIDATION ==========
+  function validateForm() {
+    const hasMedia = !!uploadedFile;
+    const hasCaption = els.captionInput.value.trim().length > 0;
+    const hasDate = !!els.dateInput.value;
+    const hasTime = !!els.timeInput.value;
+    const hasType = !!selectedType;
+    const isValid = hasMedia && hasCaption && hasDate && hasTime && hasType;
+
+    els.schedulePostBtn.classList.toggle('btn-disabled', !isValid);
+    els.schedulePostBtn.classList.toggle('btn-glow', isValid);
+    els.schedulePostBtn.disabled = !isValid;
+  }
+
+  // Caption counter & validation
+  els.captionInput.addEventListener('input', () => {
+    els.captionCount.textContent = els.captionInput.value.length;
+    validateForm();
+  });
+  els.dateInput.addEventListener('change', validateForm);
+  els.timeInput.addEventListener('change', validateForm);
+
+  // Type buttons (use event delegation since buttons are in HTML)
+  document.querySelector('.post-type-select')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.type-btn');
+    if (!btn) return;
+    selectedType = btn.dataset.type;
+    document.querySelectorAll('.type-btn').forEach(b => b.classList.toggle('active', b === btn));
+    validateForm();
+  });
+
+  // File upload
+  els.uploadZone.addEventListener('click', (e) => {
+    if (e.target.closest('#uploadPreview')) return;
+    els.fileInput.click();
+  });
+  els.fileInput.addEventListener('change', handleFileUpload);
+  els.uploadZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    els.uploadZone.classList.add('drag-over');
+  });
+  els.uploadZone.addEventListener('dragleave', () => {
+    els.uploadZone.classList.remove('drag-over');
+  });
+  els.uploadZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    els.uploadZone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length) {
+      els.fileInput.files = e.dataTransfer.files;
+      handleFileUpload();
+    }
+  });
+
+  function handleFileUpload() {
+    const file = els.fileInput.files[0];
+    if (!file) return;
+    uploadedFile = file;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      els.uploadPreview.src = e.target.result;
+      els.uploadPreview.classList.add('visible');
+      els.uploadPlaceholder.style.display = 'none';
+      validateForm();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // Copy to clipboard
+  if (els.copyCaptionBtn) {
+    els.copyCaptionBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      navigator.clipboard.writeText(els.captionInput.value).then(() => showToast('Caption copied!'));
+    });
+  }
+  if (els.copyHashtagBtn) {
+    els.copyHashtagBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      navigator.clipboard.writeText(els.hashtagInput.value).then(() => showToast('Hashtags copied!'));
+    });
+  }
+
+  // Schedule post
+  els.schedulePostBtn.addEventListener('click', () => {
+    if (els.schedulePostBtn.disabled) return;
+
+    const caption = els.captionInput.value.trim();
+    const date = els.dateInput.value;
+    const time = els.timeInput.value;
+    const hashtags = els.hashtagInput.value.trim();
+
+    const post = {
+      id: state.nextId++,
+      caption,
+      date,
+      time: time || '09:00',
+      type: selectedType,
+      status: 'scheduled',
+      hashtags,
+    };
+
+    state.posts.push(post);
+    savePosts();
+    renderCalendar();
+    renderUpcoming();
+    showToast('Post scheduled successfully!');
+
+    // Auto-reset for back-to-back scheduling
+    resetModalForBackToBack();
+  });
+
+  // Save draft
+  els.saveDraftBtn.addEventListener('click', () => {
+    const caption = els.captionInput.value.trim() || 'Untitled draft';
+    const date = els.dateInput.value || formatDate(state.today.getFullYear(), state.today.getMonth(), state.today.getDate());
+    const time = els.timeInput.value || '09:00';
+
+    const post = {
+      id: state.nextId++,
+      caption,
+      date,
+      time,
+      type: selectedType,
+      status: 'draft',
+      hashtags: els.hashtagInput.value.trim(),
+    };
+
+    state.posts.push(post);
+    savePosts();
+    closeModal();
+    renderCalendar();
+    renderUpcoming();
+    showToast('Draft saved!');
+  });
+
+  // ========== ANALYTICS — MANUAL INPUT ==========
+  function renderAnalyticsCards() {
+    const a = state.analytics;
+    if (els.statReach) {
+      els.statReach.querySelector('.stat-value').textContent = formatStatValue(a.reach);
+      els.statReach.querySelector('.stat-change').textContent = a.reachChange;
+    }
+    if (els.statEngagement) {
+      els.statEngagement.querySelector('.stat-value').textContent = a.engagement + '%';
+      els.statEngagement.querySelector('.stat-change').textContent = a.engagementChange;
+    }
+    if (els.statFollowers) {
+      els.statFollowers.querySelector('.stat-value').textContent = formatStatValue(a.followers);
+      els.statFollowers.querySelector('.stat-change').textContent = a.followersChange;
+    }
+    if (els.statPosts) {
+      els.statPosts.querySelector('.stat-value').textContent = a.postsCount;
+      els.statPosts.querySelector('.stat-change').textContent = a.postsCountChange;
+    }
+  }
+
+  function formatStatValue(num) {
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return String(num);
+  }
+
+  function attachStatCardListeners() {
+    const cards = [
+      { el: els.statReach, key: 'reach', changeKey: 'reachChange', prompt: 'Enter your Total Reach:' },
+      { el: els.statEngagement, key: 'engagement', changeKey: 'engagementChange', prompt: 'Enter your Engagement Rate (%):' },
+      { el: els.statFollowers, key: 'followers', changeKey: 'followersChange', prompt: 'Enter your Followers count:' },
+      { el: els.statPosts, key: 'postsCount', changeKey: 'postsCountChange', prompt: 'Enter Posts This Month:' },
+    ];
+
+    cards.forEach(({ el, key, changeKey, prompt: p }) => {
+      if (!el) return;
+      el.style.cursor = 'pointer';
+      el.title = 'Click to edit';
+      el.addEventListener('click', () => {
+        const val = window.prompt(p, state.analytics[key]);
+        if (val !== null && val !== '') {
+          const num = parseFloat(val);
+          if (!isNaN(num)) {
+            state.analytics[key] = num;
+            const change = window.prompt(`Enter change indicator (e.g. +12.4% or +854):`, state.analytics[changeKey]);
+            if (change !== null) state.analytics[changeKey] = change;
+            saveAnalytics();
+            renderAnalyticsCards();
+          }
+        }
+      });
+    });
+  }
+
+  // ========== PLANNING DENSITY CHART ==========
+  function drawChart() {
+    const canvas = els.engagementCanvas;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * 2;
+    canvas.height = rect.height * 2;
+    ctx.scale(2, 2);
+    const w = rect.width;
+    const h = rect.height;
+
+    ctx.clearRect(0, 0, w, h);
+
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    // Calculate planning density: count posts per day of the current week
+    const todayDate = state.today;
+    const dayOfWeek = todayDate.getDay();
+    const weekStartDate = new Date(todayDate);
+    weekStartDate.setDate(todayDate.getDate() - ((dayOfWeek + 6) % 7)); // Monday start
+
+    const density = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(weekStartDate);
+      d.setDate(weekStartDate.getDate() + i);
+      const dateStr = formatDate(d.getFullYear(), d.getMonth(), d.getDate());
+      const count = getPostsByDate(dateStr).length;
+      density.push(count);
+    }
+
+    const maxVal = Math.max(...density, 1) * 1.4;
+    const padding = { top: 20, right: 20, bottom: 35, left: 50 };
+    const chartW = w - padding.left - padding.right;
+    const chartH = h - padding.top - padding.bottom;
+
+    // Grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth = 1;
+    const gridSteps = Math.max(Math.ceil(maxVal), 4);
+    for (let i = 0; i <= 4; i++) {
+      const y = padding.top + (chartH / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(w - padding.right, y);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.font = '10px Inter';
+      ctx.textAlign = 'right';
+      const label = Math.round(maxVal - (maxVal / 4) * i);
+      ctx.fillText(String(label), padding.left - 8, y + 3);
+    }
+
+    // Day labels
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.font = '11px Inter';
+    ctx.textAlign = 'center';
+    days.forEach((d, i) => {
+      const x = padding.left + (chartW / (days.length - 1)) * i;
+      ctx.fillText(d, x, h - 8);
+    });
+
+    // Draw bars for density
+    const barWidth = chartW / days.length * 0.6;
+    density.forEach((val, i) => {
+      const x = padding.left + (chartW / (days.length - 1)) * i - barWidth / 2;
+      const barH = (val / maxVal) * chartH;
+      const y = padding.top + chartH - barH;
+
+      const gradient = ctx.createLinearGradient(x, y, x, y + barH);
+      gradient.addColorStop(0, '#DD2A7B');
+      gradient.addColorStop(1, '#8134AF');
+      ctx.fillStyle = gradient;
+
+      const radius = 4;
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + barWidth - radius, y);
+      ctx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
+      ctx.lineTo(x + barWidth, y + barH);
+      ctx.lineTo(x, y + barH);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+      ctx.fill();
+
+      // Value on top
+      if (val > 0) {
+        ctx.fillStyle = '#f0f0f5';
+        ctx.font = 'bold 11px Inter';
+        ctx.textAlign = 'center';
+        ctx.fillText(String(val), x + barWidth / 2, y - 6);
+      }
+    });
+  }
+
+  // ========== TOP POSTS (empty by default since no hardcoded data) ==========
+  function renderTopPosts() {
+    if (!els.topPostsList) return;
+    const pastPosts = state.posts.filter(p => p.date < formatDate(state.today.getFullYear(), state.today.getMonth(), state.today.getDate()));
+    if (pastPosts.length === 0) {
+      els.topPostsList.innerHTML = '<p style="text-align:center;color:var(--text-tertiary);font-size:0.82rem;padding:20px;">No published posts yet. Schedule some content to get started!</p>';
+      return;
+    }
+    const sorted = pastPosts.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 4);
+    els.topPostsList.innerHTML = sorted.map(p => {
+      const emoji = p.caption.match(/[\u{1F300}-\u{1FAFF}]/u)?.[0] || '📸';
+      const typeConf = POST_TYPES[p.type] || POST_TYPES.post;
+      return `
+      <div class="top-post-item">
+        <div class="top-post-thumb">${emoji}</div>
+        <div class="top-post-info">
+          <div class="top-post-caption">${escapeHtml(p.caption)}</div>
+          <div class="top-post-date">${formatDisplayDate(p.date)} · ${typeConf.label}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // ========== TOAST ==========
+  function showToast(message) {
+    els.toastMessage.textContent = message;
+    els.toast.classList.add('active');
+    clearTimeout(showToast._timer);
+    showToast._timer = setTimeout(() => {
+      els.toast.classList.remove('active');
+    }, 3500);
+  }
+
+  // ========== UTILITIES ==========
+  function capitalize(str) {
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function truncate(str, len) {
+    return str.length > len ? str.slice(0, len) + '…' : str;
+  }
+
+  function formatDate(year, month, day) {
+    const d = new Date(year, month, day);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+  }
+
+  function formatDisplayDate(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00');
+    return `${MONTH_NAMES[d.getMonth()].slice(0, 3)} ${d.getDate()}`;
+  }
+
+  function formatTime12(time24) {
+    const [h, m] = time24.split(':').map(Number);
+    const period = h >= 12 ? 'PM' : 'AM';
+    const hour = h % 12 || 12;
+    return `${hour}:${String(m).padStart(2, '0')} ${period}`;
+  }
+
+  function convertTo24(time12) {
+    const match = time12.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!match) return '09:00';
+    let [, h, m, period] = match;
+    h = parseInt(h);
+    if (period.toUpperCase() === 'PM' && h !== 12) h += 12;
+    if (period.toUpperCase() === 'AM' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${m}`;
+  }
+
+  function getPostsByDate(dateStr) {
+    return state.posts.filter(p => p.date === dateStr);
+  }
+
+  // ========== KEYBOARD SHORTCUTS ==========
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeModal();
+      closeSidebar();
+    }
+  });
+
+  // ========== RESIZE ==========
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (state.currentPage === 'analytics') drawChart();
+    }, 150);
+  });
+
+  // ========== INFO TOOLTIP DROPDOWNS ==========
+  document.querySelectorAll('.info-tooltip-trigger').forEach(trigger => {
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const dropdown = trigger.querySelector('.info-tooltip-dropdown');
+      if (dropdown) {
+        dropdown.classList.toggle('visible');
+        // Close on click outside
+        setTimeout(() => {
+          document.addEventListener('click', function closer() {
+            dropdown.classList.remove('visible');
+            document.removeEventListener('click', closer);
+          }, { once: true });
+        }, 0);
+      }
+    });
+  });
+
+  // ========== INIT ==========
+  function init() {
+    renderCalendarHeader();
+    renderCalendar();
+    renderBestTimes();
+    renderUpcoming();
+    renderAnalyticsCards();
+    renderTopPosts();
+    attachStatCardListeners();
+    validateForm();
+  }
+
+  init();
+
+})();
